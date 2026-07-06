@@ -1,35 +1,36 @@
 name: 'Self-Hosted Runner Availability Fallback'
 description: >-
-  Checks whether an organization's preferred self-hosted runner pool has an
-  online runner carrying every requested label, and falls back to a
-  GitHub-hosted (or other) label set when it does not.
+  Checks whether an organization's self-hosted CI infrastructure is
+  currently healthy (via a heartbeat variable), and falls back to a
+  GitHub-hosted (or other) label set when it is not.
 author: 'ExaDev'
 
 inputs:
   org:
-    description: 'The GitHub organization whose self-hosted runner fleet should be queried.'
+    description: 'The GitHub organization whose infrastructure health should be checked.'
     required: true
   preferred-labels:
     description: >-
-      Comma-separated list of labels identifying the preferred self-hosted
-      pool, e.g. self-hosted,linux,ARM64,act-latest,m3. All of these labels
-      must be present together on one online runner for the preferred pool
-      to count as available. Defaults to ExaDev's own self-hosted fleet if
-      omitted or left empty (e.g. because an org variable didn't resolve).
+      Comma-separated list of labels/runs-on target to use when the
+      organization's self-hosted infrastructure is healthy, e.g.
+      exadev-runners (an ARC runner scale set name). Defaults to ExaDev's
+      own scale set if omitted or left empty (e.g. because an org variable
+      didn't resolve).
     required: false
-    default: 'self-hosted,linux,ARM64,act-latest,m3'
+    default: 'exadev-runners'
   fallback-labels:
     description: >-
-      Comma-separated list of labels to use when the preferred pool is
-      unavailable, e.g. ubuntu-latest. Defaults to ubuntu-latest if omitted
-      or left empty.
+      Comma-separated list of labels to use when the preferred
+      infrastructure is unhealthy, e.g. ubuntu-latest. Defaults to
+      ubuntu-latest if omitted or left empty.
     required: false
     default: 'ubuntu-latest'
   token:
     description: >-
-      A token carrying read access to the organization's self-hosted runner
-      inventory. Consumed as given; this action does not mint, refresh, or
-      validate its scope beyond what the API call itself reveals.
+      A token carrying read access to the organization's Actions variables
+      (used to read the ARC_HEALTHY_UNTIL heartbeat variable). Consumed as
+      given; this action does not mint, refresh, or validate its scope
+      beyond what the API call itself reveals.
     required: true
 
 outputs:

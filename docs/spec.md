@@ -87,3 +87,72 @@ This is a new, ExaDev-specific operational decision with no connection to any
 prior art's expression or design - it did not go through the clean-room
 examine/wall-review/blind-implement pipeline used for the original algorithm,
 since there is nothing to wall off here.
+
+---
+
+## Addendum 2026-07-06: algorithm replaced with an infrastructure-health
+## heartbeat, following ExaDev/github-runner's migration to ARC
+
+`exadev/github-runner` (the consuming organization's self-hosted fleet) was
+rebuilt on GitHub's Actions Runner Controller (ARC), which autoscales
+runner pods on demand rather than keeping a fixed number of long-lived
+runners registered at all times. With `minRunners: 0`, there is normally
+**no pre-existing "online runner"** for the original algorithm (Sections
+"Algorithm" and "API contract" above) to find via `GET
+/orgs/{org}/actions/runners` — pods exist only for the duration of an
+actual job, so that endpoint would report zero online runners essentially
+all the time, whether or not the underlying infrastructure is actually
+healthy. The original algorithm's central premise no longer holds for this
+consumer, and needed to be replaced, not merely amended.
+
+**Revised algorithm:**
+
+1. Read the organization-level Actions variable `ARC_HEALTHY_UNTIL` (a unix
+   timestamp) via `GET /orgs/{org}/actions/variables/ARC_HEALTHY_UNTIL`.
+   This variable is maintained externally to this action, by a heartbeat
+   script (`exadev/github-runner`'s `scripts/heartbeat.sh`, run on a
+   schedule) that checks the underlying Kubernetes cluster and ARC
+   controller are healthy and, if so, writes `now + a short window` into
+   this variable. This action has no visibility into *how* that variable
+   is produced — it only reads and interprets it.
+2. If the variable does not exist (HTTP 404) — the heartbeat has never run
+   for this org, e.g. a brand new org with no fleet set up yet — treat this
+   as **not healthy** and use the fallback labels. This is the ordinary,
+   expected fallback path, not an error.
+3. If the read fails for any other reason (401/403/5xx — a genuine
+   auth or API failure), **fail the action** (non-zero exit), unchanged
+   from the original error-handling philosophy: masking a broken
+   credential as ordinary fallback would hide it behind what looks like
+   routine behaviour.
+4. Otherwise, compare the variable's value to the current time. If it is
+   still in the future, the infrastructure was confirmed healthy within
+   the heartbeat's own freshness window — use the preferred labels. If it
+   is in the past (the heartbeat stopped running: the host machine, the
+   cluster, or the controller broke, or the network between them is down),
+   use the fallback labels.
+
+**Inputs/outputs unaffected in shape**: `org`, `preferred-labels`,
+`fallback-labels`, `token`, `selected-runner`, `preferred-available` all
+keep the same names and meaning at the interface level — only what
+"preferred" resolves to changes (an ARC runner scale set name,
+`exadev-runners`, rather than a literal self-hosted label set) and how
+availability is determined internally. `preferred-labels`'s default value
+changes accordingly, from `self-hosted,linux,ARM64,act-latest,m3` to
+`exadev-runners`.
+
+**Retired from the algorithm** (still true facts about the GitHub API, but
+no longer relevant to this consumer's decision): pagination handling for
+the runners-listing endpoint, per-runner label-superset matching,
+case-insensitive label comparison, and the busy-runner-still-counts rule.
+These would still apply to a consumer that genuinely wants to check for a
+specific always-registered self-hosted runner (e.g. the previous
+myoung34-based design, or a future non-ARC consumer) — they are simply not
+what `exadev/github-runner` needs anymore, since it has no long-lived
+registered runners to check for at all.
+
+This is, again, a wholly new ExaDev-specific mechanism with no connection
+to the original jimmygchen/mikehardy prior art — no clean-room process
+applies to this change; it replaces ExaDev's own prior original design
+(the online-runner check), not the clean-room-derived one, since the
+thing being replaced was itself already outside the clean-room boundary
+(see the previous addendum above).
