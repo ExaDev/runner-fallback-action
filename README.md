@@ -16,6 +16,12 @@ A composite GitHub Action that decides, at run time, whether a workflow should r
 
 **API failures fail the action; no match does not.** A broken token, a typo'd org name, or a network failure surfaces as a failed action run, because silently treating those as preferred unavailable would mask a broken credential behind what looks like routine, expected fallback. The everyday case - the preferred label set simply has no online match right now - is not an error and completes normally with `preferred-available: false`.
 
+### Why the bootstrap job stays on `ubuntu-latest`
+
+The job that calls this action has to run *somewhere* before it can know whether the preferred self-hosted pool is available - that's the entire question it's answering. Anchoring it on the self-hosted pool itself would be circular: if the preferred pool were actually down, that bootstrap job would just queue against a pool that will never pick it up, and could never determine "fall back to hosted" - the one scenario this action exists to handle. `ubuntu-latest` is used specifically because it's meant to be the one thing you can always count on being available, independent of whatever this action is checking.
+
+This assumption inverts if GitHub's own hosted pool becomes the unreliable one for a given account (for example, during an account billing problem that blocks hosted runners entirely) - in that situation, anchoring the bootstrap job on self-hosted directly can be a reasonable *temporary* measure to keep testing/using this action, at the cost of losing the fallback safety net for as long as that anchoring choice is in place. See `.github/workflows/conformance.yml` for a live example of this tradeoff, made deliberately and documented inline - it is not the recommended pattern for real workflows once hosted runners are working normally again.
+
 ## Setup
 
 1. The actual label values live in ExaDev org-level Actions variables, not hardcoded per workflow: `vars.PREFERRED_LABELS` (`self-hosted,linux,ARM64,act-latest,m3`) and `vars.FALLBACK_LABELS` (`ubuntu-latest`). Changing which runners are preferred, or the fallback target, is a variable edit at `github.com/organizations/ExaDev/settings/variables/actions`, not a per-workflow edit.
@@ -70,6 +76,8 @@ gh workflow run conformance.yml \
 The workflow's `determine-runner` job calls the action and surfaces `selected-runner` and `preferred-available` as job outputs; the `confirm` job then runs on whichever pool was selected and echoes both values, giving a visible confirmation of the routing decision.
 
 To force the fallback path deliberately, dispatch with a `preferred-labels` value that no online runner in the target org can satisfy (e.g. a label combination that doesn't exist in the fleet) and confirm `preferred-available` reports `false` and `confirm` lands on the fallback labels instead.
+
+**Note:** as of 2026-07-06, `conformance.yml`'s own `determine-runner` job is temporarily anchored on the self-hosted labels directly rather than `ubuntu-latest`, because ExaDev's GitHub-hosted runners are currently blocked by an account billing issue - see "Why the bootstrap job stays on `ubuntu-latest`" above and the comment at the top of that workflow file. Revert it to `ubuntu-latest` once billing is resolved, so the conformance test itself exercises the same pattern real workflows should use.
 
 ## Credits / prior art
 

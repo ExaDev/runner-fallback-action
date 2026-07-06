@@ -3,6 +3,17 @@ name: Conformance
 # Manual exercise of the runner-fallback action against a real organization.
 # To force the fallback path (spec test vector b/c/e), supply a
 # preferred-labels value that no online runner in the target org can satisfy.
+#
+# NOTE on determine-runner's own runs-on: this job is TEMPORARILY anchored on
+# the self-hosted labels directly, not ubuntu-latest as the README's Setup
+# section recommends for real workflows. This is a deliberate, temporary
+# deviation while ExaDev's GitHub-hosted runners are blocked by an account
+# billing issue -- anchoring here on the (currently more reliable) self-hosted
+# pool unblocks testing this action at all. It sacrifices the safety net this
+# action exists to provide: if the self-hosted pool ever goes down while
+# anchored this way, this job cannot run and cannot fall back to hosted --
+# see the README's "Why the bootstrap job stays on ubuntu-latest" section.
+# Revert to runs-on: ubuntu-latest once ExaDev's billing issue is resolved.
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +34,7 @@ on:
 
 jobs:
   determine-runner:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, ARM64, act-latest, m3]
     outputs:
       selected-runner: ${{ steps.fallback.outputs.selected-runner }}
       preferred-available: ${{ steps.fallback.outputs.preferred-available }}
