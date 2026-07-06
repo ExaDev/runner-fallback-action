@@ -1,0 +1,52 @@
+name: 'Self-Hosted Runner Availability Fallback'
+description: >-
+  Checks whether an organization's preferred self-hosted runner pool has an
+  online runner carrying every requested label, and falls back to a
+  GitHub-hosted (or other) label set when it does not.
+author: 'ExaDev'
+
+inputs:
+  org:
+    description: 'The GitHub organization whose self-hosted runner fleet should be queried.'
+    required: true
+  preferred-labels:
+    description: >-
+      Comma-separated list of labels identifying the preferred self-hosted
+      pool, e.g. self-hosted,linux,ARM64,act-latest,m3. All of these labels
+      must be present together on one online runner for the preferred pool
+      to count as available.
+    required: true
+  fallback-labels:
+    description: >-
+      Comma-separated list of labels to use when the preferred pool is
+      unavailable, e.g. ubuntu-latest.
+    required: true
+  token:
+    description: >-
+      A token carrying read access to the organization's self-hosted runner
+      inventory. Consumed as given; this action does not mint, refresh, or
+      validate its scope beyond what the API call itself reveals.
+    required: true
+
+outputs:
+  selected-runner:
+    description: >-
+      A JSON-encoded array of label strings, for a downstream job's
+      runs-on via fromJson(...). Always an array, even for a single label.
+    value: ${{ steps.determine.outputs.selected-runner }}
+  preferred-available:
+    description: '"true" or "false" - whether the preferred pool was available, reported for observability.'
+    value: ${{ steps.determine.outputs.preferred-available }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine runner availability
+      id: determine
+      shell: bash
+      env:
+        ORG: ${{ inputs.org }}
+        PREFERRED_LABELS: ${{ inputs.preferred-labels }}
+        FALLBACK_LABELS: ${{ inputs.fallback-labels }}
+        TOKEN: ${{ inputs.token }}
+      run: ${{ github.action_path }}/scripts/determine-runner.sh

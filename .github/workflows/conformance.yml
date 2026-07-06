@@ -1,0 +1,55 @@
+name: Conformance
+
+# Manual exercise of the runner-fallback action against a real organization.
+# To force the fallback path (spec test vector b/c/e), supply a
+# preferred-labels value that no online runner in the target org can satisfy.
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        description: 'GitHub organization to query for self-hosted runners'
+        required: true
+        type: string
+      preferred-labels:
+        description: 'Comma-separated preferred labels, e.g. self-hosted,linux,ARM64,act-latest,m3'
+        required: true
+        type: string
+        default: 'self-hosted,linux,ARM64,act-latest,m3'
+      fallback-labels:
+        description: 'Comma-separated fallback labels, e.g. ubuntu-latest'
+        required: true
+        type: string
+        default: 'ubuntu-latest'
+
+jobs:
+  determine-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      selected-runner: ${{ steps.fallback.outputs.selected-runner }}
+      preferred-available: ${{ steps.fallback.outputs.preferred-available }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mint installation token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RUNNER_FALLBACK_APP_ID }}
+          private-key: ${{ secrets.RUNNER_FALLBACK_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.org }}
+      - name: Determine runner
+        id: fallback
+        uses: ./
+        with:
+          org: ${{ inputs.org }}
+          preferred-labels: ${{ inputs.preferred-labels }}
+          fallback-labels: ${{ inputs.fallback-labels }}
+          token: ${{ steps.app-token.outputs.token }}
+
+  confirm:
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.selected-runner) }}
+    steps:
+      - name: Report selected runner
+        run: |
+          echo "Selected runner labels: ${{ needs.determine-runner.outputs.selected-runner }}"
+          echo "Preferred pool available: ${{ needs.determine-runner.outputs.preferred-available }}"
