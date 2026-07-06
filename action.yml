@@ -14,13 +14,17 @@ inputs:
       Comma-separated list of labels identifying the preferred self-hosted
       pool, e.g. self-hosted,linux,ARM64,act-latest,m3. All of these labels
       must be present together on one online runner for the preferred pool
-      to count as available.
-    required: true
+      to count as available. Defaults to ExaDev's own self-hosted fleet if
+      omitted or left empty (e.g. because an org variable didn't resolve).
+    required: false
+    default: 'self-hosted,linux,ARM64,act-latest,m3'
   fallback-labels:
     description: >-
       Comma-separated list of labels to use when the preferred pool is
-      unavailable, e.g. ubuntu-latest.
-    required: true
+      unavailable, e.g. ubuntu-latest. Defaults to ubuntu-latest if omitted
+      or left empty.
+    required: false
+    default: 'ubuntu-latest'
   token:
     description: >-
       A token carrying read access to the organization's self-hosted runner

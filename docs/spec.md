@@ -59,3 +59,31 @@ This action checks **organization-level** self-hosted runners only. The consumin
 | (f) Preferred-labels input differs in letter case from the registered runner's labels but is otherwise identical | preferred labels | `true` |
 | (g) The runner-listing API call fails or the token is rejected | action fails (non-zero exit); no outputs are set | — |
 | (h) The specified organization does not exist (API returns not-found) | action fails (non-zero exit); no outputs are set | — |
+
+---
+
+## Addendum 2026-07-06: default values for preferred-labels and fallback-labels
+
+Real-world discovery during conformance testing: ExaDev's organization is
+currently on the GitHub Free plan, which does not propagate organization-level
+Actions variables to private repositories regardless of the variable's
+configured visibility. Any consuming workflow that writes
+`preferred-labels: ${{ vars.PREFERRED_LABELS }}` (rather than a literal
+string) would therefore receive an empty value in that situation - not because
+the caller did anything wrong, but because of this platform/plan constraint.
+
+This amends the original spec's inputs as follows: `preferred-labels` and
+`fallback-labels` are no longer strictly required. Each has a sensible,
+ExaDev-specific default (`self-hosted,linux,ARM64,act-latest,m3` and
+`ubuntu-latest` respectively) that applies both when the caller omits the
+input entirely (via `action.yml`'s own `default:`) and when the caller
+supplies it but the resolved value is empty (handled inside the script itself,
+since `action.yml` defaults do not apply to an explicitly-passed empty
+string). `org` and `token` are unaffected - there is no sensible universal
+default for either, and both remain required, failing fast if missing or
+empty exactly as originally specified.
+
+This is a new, ExaDev-specific operational decision with no connection to any
+prior art's expression or design - it did not go through the clean-room
+examine/wall-review/blind-implement pipeline used for the original algorithm,
+since there is nothing to wall off here.

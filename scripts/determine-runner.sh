@@ -4,11 +4,25 @@
 # / preferred-available outputs accordingly. See action.yml for inputs.
 set -euo pipefail
 
+# ExaDev's own default label sets, used when preferred-labels/fallback-labels
+# arrive empty -- whether because the caller omitted them (action.yml's own
+# defaults already cover that case) or because they were explicitly set to
+# an org variable that didn't resolve (e.g. an org-level Actions variable is
+# unreachable from a private repo on ExaDev's current GitHub plan). org and
+# token have no sensible universal default and remain hard-required below.
+readonly DEFAULT_PREFERRED_LABELS='self-hosted,linux,ARM64,act-latest,m3'
+readonly DEFAULT_FALLBACK_LABELS='ubuntu-latest'
+
 validate_inputs() {
   : "${ORG:?org input is required}"
-  : "${PREFERRED_LABELS:?preferred-labels input is required}"
-  : "${FALLBACK_LABELS:?fallback-labels input is required}"
   : "${TOKEN:?token input is required}"
+
+  if [[ -z "${PREFERRED_LABELS:-}" ]]; then
+    PREFERRED_LABELS="$DEFAULT_PREFERRED_LABELS"
+  fi
+  if [[ -z "${FALLBACK_LABELS:-}" ]]; then
+    FALLBACK_LABELS="$DEFAULT_FALLBACK_LABELS"
+  fi
 }
 
 # Converts a comma-separated label string into a JSON array of trimmed
