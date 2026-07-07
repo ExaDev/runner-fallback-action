@@ -156,3 +156,56 @@ applies to this change; it replaces ExaDev's own prior original design
 (the online-runner check), not the clean-room-derived one, since the
 thing being replaced was itself already outside the clean-room boundary
 (see the previous addendum above).
+
+---
+
+## Addendum 2026-07-07: heartbeat signal moved to a secret gist; the App
+## credential leaves CI entirely
+
+The 2026-07-06 design read an **org-level** Actions variable
+(`ARC_HEALTHY_UNTIL`) via an authenticated API call, which required every
+consuming repo to hold a copy of the GitHub App credential (`token`/`org`
+inputs) so it could mint an org-scoped installation token. On the GitHub Free
+plan org secrets/variables don't reach private repos, so that credential had
+to be duplicated per repo — exactly the cost this action was meant to remove.
+
+A reusable-workflow centralisation was attempted and rejected: a called
+workflow cannot read secrets from its own repo (GitHub Roadmap
+[#636](https://github.com/github/roadmap/issues/636) is "Closed as not
+planned"), so the mint could not be centralised that way.
+
+**Revised mechanism:** the heartbeat now publishes the freshness timestamp to
+a single **secret gist** (refreshed by `exadev/github-runner`'s heartbeat).
+This action reads that gist and decides — no org-scope token, no per-repo
+credential at all. A secret gist is *unlisted* (not in search/profile) but
+readable by anyone with its ID, which is the property that makes this work:
+the ID lives only in this (private) repo as the action's `gist-id` default and
+in the Mac-local config, so the only readers are ExaDev members who already
+know their own infra status — no meaningful external disclosure, yet the
+signal is single-write / many-read with no per-repo auth.
+
+**Revised algorithm:**
+
+1. **Dependabot / fork-PR guard (now in-action):** if `github.actor ==
+   'dependabot[bot]'` or `github.event.pull_request.head.repo.fork` is true,
+   emit the fallback labels without reading the gist. Untrusted code must
+   never run on the self-hosted fleet; centralising this guard means consumers
+   can't get it wrong (previously each consumer implemented the `if:` itself).
+2. Otherwise read the gist via `GET /gists/{gist_id}` (the GitHub API view is
+   authoritative and fresh, unlike the CDN-cached raw URL which lags ~5 min).
+   `GITHUB_TOKEN` (the automatic per-run token) is attached purely for
+   rate-limit headroom; the gist is readable without it.
+3. If the gist's file content is a unix timestamp still greater than `now` →
+   preferred labels. Anything else (missing file, stale, non-numeric, or the
+   read failed) → fallback labels. There is no longer a "fail loud on auth
+   error" path: with no credential involved, every non-healthy outcome is the
+   ordinary, graceful fallback.
+
+**Inputs changed:** `token` and `org` are removed. Added `gist-id` (default =
+the ExaDev heartbeat gist). `preferred-labels`/`fallback-labels` and both
+outputs are unchanged. A consuming `determine-runner` job is now a bare
+`uses:` of this action with no `with:` at all in the common case.
+
+This is a wholly ExaDev-specific mechanism (no connection to the original
+clean-room prior art), so no clean-room process applies; it is documented
+here as a dated addendum, with the prior sections retained as history.

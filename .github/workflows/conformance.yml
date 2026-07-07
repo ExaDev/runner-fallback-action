@@ -1,9 +1,10 @@
 name: Conformance
 
-# Manual exercise of the runner-fallback action against a real organization.
-# To force the fallback path, supply a preferred-labels value that does not
-# match a healthy ARC_HEALTHY_UNTIL heartbeat window (e.g. a nonexistent org,
-# or run while the M3 Mac / k3s / ARC controller is intentionally stopped).
+# Manual end-to-end exercise of the runner-fallback action against the live
+# heartbeat gist. To force the fallback path, dispatch with a gist-id whose
+# content is stale or missing (e.g. a freshly-created empty gist), or run
+# while the M3 Mac / k3s / ARC controller is intentionally stopped so the
+# heartbeat timestamp goes stale.
 #
 # NOTE on determine-runner's own runs-on: this job is TEMPORARILY anchored on
 # the ARC scale set directly, not ubuntu-latest as the README's Setup section
@@ -18,10 +19,11 @@ name: Conformance
 on:
   workflow_dispatch:
     inputs:
-      org:
-        description: 'GitHub organization to query for self-hosted runners'
+      gist-id:
+        description: 'ID of the heartbeat gist to read (override with a stale/empty gist to force the fallback path)'
         required: true
         type: string
+        default: '6d3da191f6fa5ed67282d528c3977e75'
       preferred-labels:
         description: 'ARC runner scale set name, e.g. exadev-runners'
         required: true
@@ -41,21 +43,13 @@ jobs:
       preferred-available: ${{ steps.fallback.outputs.preferred-available }}
     steps:
       - uses: actions/checkout@v4
-      - name: Mint installation token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.RUNNER_FALLBACK_APP_ID }}
-          private-key: ${{ secrets.RUNNER_FALLBACK_APP_PRIVATE_KEY }}
-          owner: ${{ inputs.org }}
       - name: Determine runner
         id: fallback
         uses: ./
         with:
-          org: ${{ inputs.org }}
+          gist-id: ${{ inputs.gist-id }}
           preferred-labels: ${{ inputs.preferred-labels }}
           fallback-labels: ${{ inputs.fallback-labels }}
-          token: ${{ steps.app-token.outputs.token }}
 
   confirm:
     needs: determine-runner

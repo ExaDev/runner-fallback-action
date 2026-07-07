@@ -1,20 +1,22 @@
 # Runner Fallback Action
 
-A composite GitHub Action that decides, at run time, whether a workflow should route a downstream job to ExaDev's self-hosted runner fleet or fall back to a GitHub-hosted runner. It checks a heartbeat variable (`ARC_HEALTHY_UNTIL`) that ExaDev's self-hosted fleet maintains against the current time, and emits a `runs-on`-ready label array plus an availability flag so a bootstrap job can hand off to whichever pool is actually usable.
+A composite GitHub Action that decides, at run time, whether a workflow should route a downstream job to ExaDev's self-hosted runner fleet or fall back to a GitHub-hosted runner. It reads a freshness timestamp that ExaDev's fleet publishes to a **secret gist** and compares it to the current time, then emits a `runs-on`-ready label array plus an availability flag so a bootstrap job can hand off to whichever pool is actually usable.
 
-**Note (2026-07-06):** the algorithm below describes the *current* design. This action originally checked the organization's live self-hosted runner inventory for a single online runner carrying every label in a preferred set (documented in `docs/spec.md`'s original body). That design assumed a fixed pool of long-lived, always-registered runners. ExaDev's fleet (`exadev/github-runner`) has since moved to GitHub's Actions Runner Controller (ARC), which autoscales runner pods on demand and scales to zero when idle - there is normally no online runner to find at all, healthy or not. See `docs/spec.md`'s 2026-07-06 addendum for the full replacement algorithm; this README describes only the current behaviour.
+It needs **no secret and no organisation-scoped token** — the gist is unlisted but readable by anyone who has its ID (which lives only in this private repo and the fleet's Mac-local config). A consuming `determine-runner` job is just a bare `uses:` of this action with no `with:` in the common case.
+
+**History:** this action originally checked the org's live self-hosted runner inventory (documented in `docs/spec.md`'s original body), then read an org-level `ARC_HEALTHY_UNTIL` variable via a minted App token (2026-07-06 addendum). The org-variable design forced every consumer to hold a copy of the App credential, which on the GitHub Free plan can't be shared from org level — so the signal moved to a single secret gist (2026-07-07 addendum), removing the credential from CI entirely. This README describes the current (gist) design.
 
 ## Design decisions
 
-**The heartbeat, not a runner inventory, is the source of truth.** `exadev/github-runner`'s `scripts/heartbeat.sh` runs on a schedule on the M3 Mac that hosts the fleet's k3s/ARC cluster, checks the cluster and controller are healthy, and if so pushes `ARC_HEALTHY_UNTIL = now + a short window` to an ExaDev org-level Actions variable. This action reads that single variable (`GET /orgs/{org}/actions/variables/ARC_HEALTHY_UNTIL`) and compares it to the current time - it has no visibility into, and makes no assumptions about, how the cluster itself is checked.
+**A secret gist is the source of truth.** `exadev/github-runner`'s heartbeat (a docker-compose service on the M3 Mac) checks the k3s cluster and ARC controller are healthy and, if so, refreshes a single secret gist with `now + a short window`. This action reads that gist and compares it to the current time. It has no visibility into, and makes no assumptions about, how the cluster itself is checked.
 
-**A missing heartbeat variable (404) means "not healthy", not "error".** An org that has never had the fleet's heartbeat configured (or a brand-new org) simply has no variable to read yet - that's the ordinary, everyday fallback path, not a failure.
+**No credential is required.** The gist is read over the public GitHub API (`GET /gists/{id}`). The automatic per-run `GITHUB_TOKEN` is attached only for rate-limit headroom (the gist is readable without it). There is no App token to mint and no per-repo secret to provision — adding a new consumer is just `uses: ExaDev/runner-fallback-action@<sha>`.
 
-**Any other non-2xx response fails the action.** A broken token, a typo'd org name, or a network/API failure surfaces as a failed action run, because silently treating those as "not healthy" would mask a broken credential behind what looks like routine, expected fallback.
+**The Dependabot / fork-PR guard lives in the action.** If `github.actor == 'dependabot[bot]'` or the run is a fork PR, the action emits the fallback labels without reading the gist — untrusted code must never run on the self-hosted fleet. Centralising this guard means consumers can't get it wrong (previously each consumer implemented the `if:` itself).
 
-**A stale timestamp means "not healthy".** If the heartbeat variable's value is in the past, the fleet stopped reporting healthy within its own freshness window - the host machine, the cluster, the ARC controller, or the network between them could be down. Whatever the cause, the fallback path is used.
+**Anything other than a fresh timestamp means "not healthy" (gracefully).** A missing gist file, a stale value, a non-numeric value, or a failed read all select the fallback labels — never a hard failure. There's no credential left to fail loud on, and the safe direction is "don't route to a fleet whose health we couldn't confirm".
 
-**Organization scope only.** ExaDev only ever calls this action at the organization level, so the implementation has exactly one code path: reading `/orgs/{org}/actions/variables/ARC_HEALTHY_UNTIL`. There are no inputs, branches, or helper functions for repository- or enterprise-scoped checks - adding them would be speculative generality for a caller that doesn't exist.
+**The API view, not the raw URL.** The gist's raw `gist.githubusercontent.com` URL is CDN-cached for ~5 min and cachebusters don't bypass it; the API view is authoritative and fresh, so the action reads via the API.
 
 ### Why the bootstrap job stays on `ubuntu-latest`
 
@@ -24,13 +26,11 @@ This assumption inverts if GitHub's own hosted pool becomes the unreliable one f
 
 ### Built-in defaults for preferred/fallback labels
 
-`preferred-labels` and `fallback-labels` are optional. If omitted, they default to `exadev-runners` (the ARC runner scale set name) and `ubuntu-latest` respectively — and the same defaults apply if a caller explicitly passes them but the value resolves empty (e.g. `${{ vars.PREFERRED_LABELS }}` when that org variable isn't reachable). This matters because **ExaDev's org is currently on the GitHub Free plan, which does not propagate organization-level Actions variables to private repositories at all**, regardless of the variable's visibility setting — so referencing `vars.PREFERRED_LABELS`/`vars.FALLBACK_LABELS` from a private repo may silently resolve to nothing until the plan/billing situation changes. The action's own defaults mean it still does the right thing either way. `org` and `token` have no sensible universal default and remain required. (The `ARC_HEALTHY_UNTIL` heartbeat variable this action actually reads is written by `exadev/github-runner`'s heartbeat script directly via `gh variable set`, not via a workflow's `vars.` context, so it isn't subject to this Free-plan propagation limitation the same way `PREFERRED_LABELS`/`FALLBACK_LABELS` are.)
+`preferred-labels` and `fallback-labels` are optional, defaulting to `exadev-runners` (the ARC runner scale set name) and `ubuntu-latest`. Omit them entirely in the common case. `gist-id` is also optional, defaulting to ExaDev's own heartbeat gist.
 
 ## Setup
 
-1. The label values live in ExaDev org-level Actions variables, not hardcoded per workflow: `vars.PREFERRED_LABELS` (`exadev-runners`) and `vars.FALLBACK_LABELS` (`ubuntu-latest`). Changing which pool is preferred, or the fallback target, is a variable edit at `github.com/organizations/ExaDev/settings/variables/actions`, not a per-workflow edit. On the current Free plan these two variables won't actually reach private repos (see above) — omit the inputs entirely to rely on the action's built-in defaults until that's resolved, or set repo-level overrides for repos that need this now. The heartbeat variable itself (`ARC_HEALTHY_UNTIL`) needs no such setup on the caller's side - the action reads it directly.
-
-2. Reference the action from a bootstrap job that runs on a GitHub-hosted runner (self-hosted availability isn't known yet, so this job can't itself run on the self-hosted pool). Authenticate using a token with read access to the organization's Actions variables (the same GitHub App used elsewhere in ExaDev's fleet tooling is sufficient), minting a short-lived installation token rather than storing a long-lived PAT:
+1. Reference the action from a bootstrap job (ideally on `ubuntu-latest`; see above). No token, no secret, no `with:` needed:
 
    ```yaml
    jobs:
@@ -40,23 +40,11 @@ This assumption inverts if GitHub's own hosted pool becomes the unreliable one f
          selected-runner: ${{ steps.fallback.outputs.selected-runner }}
          preferred-available: ${{ steps.fallback.outputs.preferred-available }}
        steps:
-         - name: Mint installation token
-           id: app-token
-           uses: actions/create-github-app-token@v1
-           with:
-             app-id: ${{ vars.RUNNER_FALLBACK_APP_ID }}
-             private-key: ${{ secrets.RUNNER_FALLBACK_APP_PRIVATE_KEY }}
-             owner: ${{ github.repository_owner }}
-         - uses: ExaDev/runner-fallback-action@main
+         - uses: ExaDev/runner-fallback-action@<pinned-sha>
            id: fallback
-           with:
-             org: ${{ github.repository_owner }}
-             preferred-labels: ${{ vars.PREFERRED_LABELS }}
-             fallback-labels: ${{ vars.FALLBACK_LABELS }}
-             token: ${{ steps.app-token.outputs.token }}
    ```
 
-3. Wire the output into the downstream job:
+2. Wire the output into the downstream job:
 
    ```yaml
      build:
@@ -66,20 +54,22 @@ This assumption inverts if GitHub's own hosted pool becomes the unreliable one f
          - run: echo "Running on: ${{ needs.determine-runner.outputs.selected-runner }}"
    ```
 
+That's the whole setup — the heartbeat (in `exadev/github-runner`) keeps the gist fresh; nothing per-repo is required.
+
 ## Verification
 
-Run `.github/workflows/conformance.yml` via `workflow_dispatch` against a real organization to exercise the action end to end:
+Run `.github/workflows/conformance.yml` via `workflow_dispatch`:
 
 ```bash
 gh workflow run conformance.yml \
-  -f org=my-org \
+  -f gist-id=6d3da191f6fa5ed67282d528c3977e75 \
   -f preferred-labels=exadev-runners \
   -f fallback-labels=ubuntu-latest
 ```
 
-The workflow's `determine-runner` job calls the action and surfaces `selected-runner` and `preferred-available` as job outputs; the `confirm` job then runs on whichever pool was selected and echoes both values, giving a visible confirmation of the routing decision.
+The `determine-runner` job calls the action and surfaces `selected-runner` / `preferred-available`; the `confirm` job runs on whichever pool was selected and echoes both, giving a visible confirmation of the routing decision.
 
-To force the fallback path deliberately, dispatch against an org whose `ARC_HEALTHY_UNTIL` variable is missing or stale - for example, an org where the fleet's heartbeat has never run, or by temporarily stopping the M3 Mac's heartbeat launchd job (`launchctl unload ~/Library/LaunchAgents/com.exadev.github-runner.heartbeat.plist` on the M3 Mac) and waiting past the heartbeat's freshness window - and confirm `preferred-available` reports `false` and `confirm` lands on the fallback labels instead.
+To force the fallback path, dispatch with a `gist-id` whose content is stale or missing (e.g. a freshly-created empty gist), or stop the M3 Mac's heartbeat so the timestamp goes stale, and confirm `preferred-available` reports `false` and `confirm` lands on the fallback labels.
 
 **Note:** as of 2026-07-06, `conformance.yml`'s own `determine-runner` job is temporarily anchored on the ARC scale set directly rather than `ubuntu-latest`, because ExaDev's GitHub-hosted runners are currently blocked by an account billing issue - see "Why the bootstrap job stays on `ubuntu-latest`" above and the comment at the top of that workflow file. Revert it to `ubuntu-latest` once billing is resolved, so the conformance test itself exercises the same pattern real workflows should use.
 

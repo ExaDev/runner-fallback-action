@@ -1,37 +1,35 @@
 name: 'Self-Hosted Runner Availability Fallback'
 description: >-
-  Checks whether an organization's self-hosted CI infrastructure is
-  currently healthy (via a heartbeat variable), and falls back to a
-  GitHub-hosted (or other) label set when it is not.
+  Checks whether ExaDev's self-hosted CI infrastructure is currently healthy
+  (via a heartbeat timestamp published to a secret gist), and falls back to a
+  GitHub-hosted (or other) label set when it is not. No secret or
+  organisation-scoped token required: the gist is unlisted, read over the
+  public GitHub API. The automatic GITHUB_TOKEN is used only for rate-limit
+  headroom.
 author: 'ExaDev'
 
 inputs:
-  org:
-    description: 'The GitHub organization whose infrastructure health should be checked.'
-    required: true
+  gist-id:
+    description: >-
+      ID of the secret gist that the heartbeat refreshes with a unix timestamp
+      (the fleet's "healthy until" time). Read via the GitHub API over HTTPS.
+      Defaults to ExaDev's own heartbeat gist.
+    required: false
+    default: '6d3da191f6fa5ed67282d528c3977e75'
   preferred-labels:
     description: >-
-      Comma-separated list of labels/runs-on target to use when the
-      organization's self-hosted infrastructure is healthy, e.g.
-      exadev-runners (an ARC runner scale set name). Defaults to ExaDev's
-      own scale set if omitted or left empty (e.g. because an org variable
-      didn't resolve).
+      Comma-separated list of labels/runs-on target to use when the self-hosted
+      infrastructure is healthy, e.g. exadev-runners (an ARC runner scale set
+      name). Defaults to ExaDev's own scale set if omitted or left empty.
     required: false
     default: 'exadev-runners'
   fallback-labels:
     description: >-
-      Comma-separated list of labels to use when the preferred
-      infrastructure is unhealthy, e.g. ubuntu-latest. Defaults to
-      ubuntu-latest if omitted or left empty.
+      Comma-separated list of labels to use when the preferred infrastructure
+      is unhealthy, e.g. ubuntu-latest. Defaults to ubuntu-latest if omitted or
+      left empty.
     required: false
     default: 'ubuntu-latest'
-  token:
-    description: >-
-      A token carrying read access to the organization's Actions variables
-      (used to read the ARC_HEALTHY_UNTIL heartbeat variable). Consumed as
-      given; this action does not mint, refresh, or validate its scope
-      beyond what the API call itself reveals.
-    required: true
 
 outputs:
   selected-runner:
@@ -50,8 +48,14 @@ runs:
       id: determine
       shell: bash
       env:
-        ORG: ${{ inputs.org }}
+        GIST_ID: ${{ inputs.gist-id }}
         PREFERRED_LABELS: ${{ inputs.preferred-labels }}
         FALLBACK_LABELS: ${{ inputs.fallback-labels }}
-        TOKEN: ${{ inputs.token }}
+        # Used only for API rate-limit headroom (the gist is readable without
+        # it). The automatic per-run token; not a secret the caller provisions.
+        GITHUB_TOKEN: ${{ github.token }}
+        # Drives the in-action Dependabot/fork-PR guard so consumers can't get
+        # it wrong: untrusted code must never run on the self-hosted fleet.
+        GITHUB_ACTOR: ${{ github.actor }}
+        PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
       run: ${{ github.action_path }}/scripts/determine-runner.sh
