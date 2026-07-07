@@ -191,10 +191,13 @@ signal is single-write / many-read with no per-repo auth.
    emit the fallback labels without reading the gist. Untrusted code must
    never run on the self-hosted fleet; centralising this guard means consumers
    can't get it wrong (previously each consumer implemented the `if:` itself).
-2. Otherwise read the gist via `GET /gists/{gist_id}` (the GitHub API view is
-   authoritative and fresh, unlike the CDN-cached raw URL which lags ~5 min).
-   `GITHUB_TOKEN` (the automatic per-run token) is attached purely for
-   rate-limit headroom; the gist is readable without it.
+2. Otherwise read the gist via an **unauthenticated** `GET /gists/{gist_id}`
+   (the GitHub API view is authoritative and fresh, unlike the CDN-cached raw
+   URL which lags ~5 min). The request is deliberately anonymous: a secret
+   gist is "unlisted" (readable by anyone with its ID over HTTPS) but only
+   via an anonymous request — authenticating as anyone other than the owner
+   returns 404, so the per-run `GITHUB_TOKEN` can't read it. The
+   unauthenticated rate limit (60/hr/IP) is ample for one read per run.
 3. If the gist's file content is a unix timestamp still greater than `now` →
    preferred labels. Anything else (missing file, stale, non-numeric, or the
    read failed) → fallback labels. There is no longer a "fail loud on auth

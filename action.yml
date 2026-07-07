@@ -2,10 +2,9 @@ name: 'Self-Hosted Runner Availability Fallback'
 description: >-
   Checks whether ExaDev's self-hosted CI infrastructure is currently healthy
   (via a heartbeat timestamp published to a secret gist), and falls back to a
-  GitHub-hosted (or other) label set when it is not. No secret or
-  organisation-scoped token required: the gist is unlisted, read over the
-  public GitHub API. The automatic GITHUB_TOKEN is used only for rate-limit
-  headroom.
+  GitHub-hosted (or other) label set when it is not. No secret or token
+  required: the gist is unlisted, read unauthenticated over the public
+  GitHub API.
 author: 'ExaDev'
 
 inputs:
@@ -51,9 +50,6 @@ runs:
         GIST_ID: ${{ inputs.gist-id }}
         PREFERRED_LABELS: ${{ inputs.preferred-labels }}
         FALLBACK_LABELS: ${{ inputs.fallback-labels }}
-        # Used only for API rate-limit headroom (the gist is readable without
-        # it). The automatic per-run token; not a secret the caller provisions.
-        GITHUB_TOKEN: ${{ github.token }}
         # Drives the in-action Dependabot/fork-PR guard so consumers can't get
         # it wrong: untrusted code must never run on the self-hosted fleet.
         GITHUB_ACTOR: ${{ github.actor }}

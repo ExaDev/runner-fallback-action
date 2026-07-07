@@ -42,20 +42,19 @@ emit() {
 }
 
 # Reads the heartbeat timestamp from the secret gist via the GitHub API.
-# Uses GITHUB_TOKEN if present purely for rate-limit headroom (the gist is
-# readable without it - secret gists are unlisted, accessible by ID). The API
-# view is authoritative and fresh, unlike the CDN-cached raw URL.
+# Deliberately UNAUTHENTICATED: a secret gist is "unlisted" - readable by
+# anyone with its ID over plain HTTPS, but only via an anonymous request.
+# Authenticating as anyone other than the gist's owner returns 404 (so the
+# per-run GITHUB_TOKEN, which belongs to the github-actions bot, can't read
+# it). The unauthenticated rate limit (60/hr/IP) is ample for one read per
+# workflow run. The API view is authoritative and fresh, unlike the
+# CDN-cached raw URL (~5 min lag).
 read_healthy_until() {
-  local auth_args=() response
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-  fi
-  # curl -f: a non-2xx (rate limit, network, gone) returns non-zero → empty.
-  # jq // empty: a missing file/key yields nothing rather than "null".
-  response="$(curl -fsS "${auth_args[@]}" \
-    -H "Accept: application/vnd.github+json" \
+  local response
+  response="$(curl -fsS -H "Accept: application/vnd.github+json" \
     "https://api.github.com/gists/${GIST_ID}" 2>/dev/null || true)"
-  jq -r --arg file "$GIST_FILE" '.files[$file].content // empty' <<<"$response" \
+  [[ -n "$response" ]] || return 0
+  jq -r --arg file "$GIST_FILE" '.files[$file].content // empty' <<<"$response" 2>/dev/null \
     | tr -d '[:space:]'
 }
 
