@@ -1,5 +1,7 @@
 # Runner Fallback Action
 
+[![GitHub](https://img.shields.io/badge/GitHub-181717?logo=github&logoColor=white)](https://github.com/ExaDev/runner-fallback-action)
+
 A composite GitHub Action that decides, at run time, whether a workflow should route a downstream job to ExaDev's self-hosted runner fleet or fall back to a GitHub-hosted runner. It reads a freshness timestamp that ExaDev's fleet publishes to a **secret gist** and compares it to the current time, then emits a `runs-on`-ready label array plus an availability flag so a bootstrap job can hand off to whichever pool is actually usable.
 
 It needs **no secret and no organisation-scoped token** — the gist is unlisted but readable by anyone who has its ID (which lives only in this private repo and the fleet's Mac-local config). A consuming `determine-runner` job is just a bare `uses:` of this action with no `with:` in the common case.
