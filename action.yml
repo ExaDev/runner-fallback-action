@@ -54,4 +54,6 @@ runs:
         # it wrong: untrusted code must never run on the self-hosted fleet.
         GITHUB_ACTOR: ${{ github.actor }}
         PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        # A public repository is served by GitHub-hosted runners: an organisation's default runner group does not accept public repositories, so a job asking for the fleet would wait for a runner that can never take it, and the fleet should not run public repositories' code anyway.
+        REPO_PRIVATE: ${{ github.event.repository.private }}
       run: ${{ github.action_path }}/scripts/determine-runner.sh

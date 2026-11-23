@@ -65,7 +65,10 @@ main() {
   # self-hosted fleet. Force the fallback labels without even reading the gist.
   # (PR_IS_FORK is empty for non-PR events; only the literal string "true"
   # counts as a fork.)
-  if [[ "${GITHUB_ACTOR:-}" == "dependabot[bot]" ]] || [[ "${PR_IS_FORK:-}" == "true" ]]; then
+  # A public repository (REPO_PRIVATE is the literal string "false") also
+  # takes the fallback: the default runner group does not accept public
+  # repositories, so a job asking for the fleet would queue forever.
+  if [[ "${GITHUB_ACTOR:-}" == "dependabot[bot]" ]] || [[ "${PR_IS_FORK:-}" == "true" ]] || [[ "${REPO_PRIVATE:-}" == "false" ]]; then
     emit fallback
     return 0
   fi
